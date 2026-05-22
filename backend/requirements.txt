@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+sqlalchemy
+python-dotenv
+google-genai
+openai
+zhipuai
+python-multipart
+# RAG pipeline — local document retrieval (lazy-import safe)
+pymupdf==1.27.2.3
+sentence-transformers==5.5.0
+chromadb==1.5.9
