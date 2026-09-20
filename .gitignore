@@ -1,0 +1,34 @@
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.tsbuildinfo
+dist/
+frontend/dist/
+.venv/
+venv/
+
+# Node
+node_modules/
+
+# Database
+*.db
+*.sqlite3
+backend/uploaded_reports/
+*.log
+
+# Chroma
+backend/chroma_store/
+
+# IDE
+.vscode/
+.idea/
+
+# Local project material and generated artefacts
+tmp/
+tmp_*/
+backend/**/__pycache__/

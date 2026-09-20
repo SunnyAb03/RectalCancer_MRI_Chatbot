@@ -43,28 +43,28 @@ type VisualSlide = {
   caption: string;
 };
 
-const API_BASE = "http://127.0.0.1:8000";
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 const MOCK_USER_ID = 1;
 const visualSlides: VisualSlide[] = [
   {
     src: "/images/T.png",
     title: "T-Stage Diagram",
-    caption: "T-Stage: Tumor Penetration Depth",
+    caption: "T-Stage: how far the tumour has grown through the bowel wall",
   },
   {
     src: "/images/CRM.png",
     title: "CRM Diagram",
-    caption: "CRM: Circumferential Resection Margin",
+    caption: "CRM: the 'safety border' where the surgeon cuts around the tumour",
   },
   {
     src: "/images/EMVI.png",
     title: "EMVI Diagram",
-    caption: "EMVI: Extramural Venous Invasion",
+    caption: "EMVI (Extramural Venous Invasion): tumour spread along tiny blood vessels",
   },
   {
     src: "/images/TD.png",
-    title: "Tumor Deposit Diagram",
-    caption: "TD: Tumor Deposits in surrounding tissue",
+    title: "Tumour Deposit Diagram",
+    caption: "Tumour Deposits: small clusters of cancer cells in the fat around the bowel (Source: adapted from published medical illustrations)",
   },
 ];
 
@@ -108,7 +108,7 @@ export default function App() {
     {
       role: "assistant",
       content:
-        "Hello. I am your MRI Companion AI assistant. Upload your report, then ask me what each result means in simple words.",
+        "Hello. I am your MRI Companion AI assistant. I am here to help you understand your MRI report after you have spoken with your consultant, doctor or nurse. Upload your report below, then ask me what each result means in simple words.",
     },
   ]);
 
@@ -459,7 +459,7 @@ export default function App() {
             }}
           >
             <h2 style={{ margin: "0 0 12px 0", fontSize: "1rem", color: palette.emeraldSignal }}>
-              Extracted MRI Metrics
+              Your MRI Results
             </h2>
             {reportId === null ? (
               <div style={{ color: palette.textTertiary, fontSize: "0.9rem" }}>
@@ -506,7 +506,7 @@ export default function App() {
                 e.currentTarget.style.backgroundColor = "transparent";
               }}
             >
-              {isVisualOpen ? "🖼️ Hide Visual Explanations" : "🖼️ View Visual Explanations"}
+              {isVisualOpen ? "Hide Visual Explanations" : "View Visual Explanations"}
             </button>
             {isVisualOpen && (
               <div style={{ borderTop: "1px solid #e5e7eb", padding: 14 }}>
@@ -694,35 +694,11 @@ export default function App() {
   );
 }
 
-function isHighRiskMetric(label: string, value: string): boolean {
-  const normalized = value.toLowerCase().trim();
-  if (!normalized) return false;
-
-  if (label === "T-Stage") {
-    return /(t3c|t3d|t4a|t4b|t4)/i.test(value);
-  }
-  if (label === "N-Stage") {
-    return /(n1c|n1|n2)/i.test(value);
-  }
-  if (label === "Tumor Deposits") {
-    return normalized === "present";
-  }
-  if (label === "CRM") {
-    return normalized === "involved" || normalized === "positive";
-  }
-  if (label === "EMVI") {
-    return normalized === "positive" || normalized === "present";
-  }
-  return false;
-}
-
 function Metric({ label, value }: { label: string; value: string }) {
-  const highRisk = isHighRiskMetric(label, value);
-
   return (
     <div
       style={{
-        border: highRisk ? "1px solid #fecaca" : `1px solid ${palette.border}`,
+        border: `1px solid ${palette.border}`,
         borderRadius: 10,
         padding: 10,
         marginBottom: 8,
@@ -730,24 +706,8 @@ function Metric({ label, value }: { label: string; value: string }) {
       }}
     >
       <div style={{ fontSize: "0.8rem", color: palette.textTertiary, marginBottom: 4 }}>{label}</div>
-      <div style={{ fontSize: "0.95rem", color: highRisk ? "#be123c" : palette.textPrimary }}>
+      <div style={{ fontSize: "0.95rem", color: palette.textPrimary }}>
         {value}
-        {highRisk && (
-          <span
-            style={{
-              marginLeft: 8,
-              backgroundColor: "#fee2e2",
-              color: "#b91c1c",
-              fontSize: "0.72rem",
-              padding: "2px 8px",
-              borderRadius: 999,
-              verticalAlign: "middle",
-              fontWeight: 600,
-            }}
-          >
-            ⚠ Attention
-          </span>
-        )}
       </div>
     </div>
   );

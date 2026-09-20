@@ -1,0 +1,10 @@
+__pycache__
+*.pyc
+*.pyo
+.env
+.venv
+venv
+chroma_store/
+*.db
+*.sqlite3
+uploaded_reports/

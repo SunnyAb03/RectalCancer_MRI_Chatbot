@@ -16,13 +16,11 @@ except ImportError:  # pragma: no cover - optional dependency
     ZhipuAI = None
 
 
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "AIzaSyDIMuvZMT6jwgHwTKv-jm-1SOoyjwbZkJk")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "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")
-GLM_API_KEY = os.getenv("GLM_API_KEY", "2ddfa2ac444c497092c2126ddd3d18c8.dppv4Ruv4ChnCDp8")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+GLM_API_KEY = os.getenv("GLM_API_KEY")
 
-# GOOGLE_API_KEY = "AIzaSyDIMuvZMT6jwgHwTKv-jm-1SOoyjwbZkJk"
-# GLM_API_KEY = "2ddfa2ac444c497092c2126ddd3d18c8.dppv4Ruv4ChnCDp8"
-# OPENAI_API_KEY = "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"
+RAG_ENABLED = False  # Set to True to re-enable RAG literature retrieval
 
 
 def _ensure_api_key(name: str, value: str) -> None:
@@ -31,13 +29,21 @@ def _ensure_api_key(name: str, value: str) -> None:
 
 
 def run_extractor_agent(pdf_path: str) -> dict[str, Any]:
-    """Agent 1: parse MRI PDF and return strict structured JSON."""
-    _ensure_api_key("GOOGLE_API_KEY", GOOGLE_API_KEY)
-    client = genai.Client(api_key=GOOGLE_API_KEY)
-    uploaded_pdf = client.files.upload(file=pdf_path)
+    """Agent 1: parse MRI PDF (scanned or text) and return strict structured JSON via GPT vision."""
+    _ensure_api_key("OPENAI_API_KEY", OPENAI_API_KEY)
+    client = OpenAI(api_key=OPENAI_API_KEY)
 
-    extract_prompt = """
-You are an expert oncological radiologist. Read the attached scanned rectal cancer MRI report.
+    import fitz, base64
+
+    doc = fitz.open(pdf_path)
+    page_images = []
+    for page in doc:
+        pix = page.get_pixmap(dpi=200)
+        img_b64 = base64.b64encode(pix.tobytes("png")).decode()
+        page_images.append(img_b64)
+    doc.close()
+
+    extract_prompt = """You are an expert oncological radiologist. Read the attached rectal cancer MRI report images.
 Return ONLY valid JSON using this exact schema:
 {
   "report_summary": "Provide a brief 1-2 sentence clinical summary of the overall MRI findings.",
@@ -47,22 +53,25 @@ Return ONLY valid JSON using this exact schema:
   "crm_status": "'Threatened', 'Involved', 'Clear', or 'Not mentioned'",
   "emvi_status": "'Positive', 'Negative', or 'Not mentioned'",
   "mrtrg_score": "mrTRG score, else 'Not applicable'",
-  "tumor_deposits": "'Present', 'Absent', or 'Not mentioned'"
+  "tumor_deposits": "'Present', 'None', or 'Not mentioned'"
 }
-Do not include markdown, prose, or extra keys.
-"""
+Do not include markdown, prose, or extra keys."""
 
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=[uploaded_pdf, extract_prompt],
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            temperature=0.3,
-        ),
+    content: list = [{"type": "text", "text": extract_prompt}]
+    for img_b64 in page_images:
+        content.append({
+            "type": "image_url",
+            "image_url": {"url": f"data:image/png;base64,{img_b64}"},
+        })
+
+    response = client.chat.completions.create(
+        model="gpt-5.5",
+        messages=[{"role": "user", "content": content}],
+        response_format={"type": "json_object"},
     )
 
     try:
-        parsed = json.loads(response.text or "{}")
+        parsed = json.loads(response.choices[0].message.content or "{}")
     except json.JSONDecodeError as exc:
         raise RuntimeError("Extractor returned invalid JSON.") from exc
 
@@ -83,25 +92,23 @@ Do not include markdown, prose, or extra keys.
 
 
 def run_summarizer_agent(extracted_json: dict[str, Any], language: str) -> str:
-    """Agent 2: produce a short patient-friendly summary."""
-    _ensure_api_key("GOOGLE_API_KEY", GOOGLE_API_KEY)
-    client = genai.Client(api_key=GOOGLE_API_KEY)
+    """Agent 2: produce a short patient-friendly summary via GPT."""
+    _ensure_api_key("OPENAI_API_KEY", OPENAI_API_KEY)
+    client = OpenAI(api_key=OPENAI_API_KEY)
 
-    prompt = f"""
-You are a clinical nurse specialist.
+    prompt = f"""You are a clinical nurse specialist.
 Write exactly 1-2 short sentences in {language}.
 Use UK NHS 9-11 year old reading level.
 Explain this MRI result in simple words.
 Never predict prognosis, survival, or recurrence.
 MRI JSON:
-{json.dumps(extracted_json, ensure_ascii=False)}
-"""
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt,
-        config=types.GenerateContentConfig(temperature=0.2),
+{json.dumps(extracted_json, ensure_ascii=False)}"""
+
+    response = client.chat.completions.create(
+        model="gpt-5.5",
+        messages=[{"role": "user", "content": prompt}],
     )
-    return (response.text or "").strip()
+    return (response.choices[0].message.content or "").strip()
 
 
 def _chat_system_prompt(language: str = "English", literature_context: str = "") -> str:
@@ -133,24 +140,24 @@ CLINICAL GLOSSARY & EXPLANATION GUIDELINES (Based on Cancer Research UK):
 - N1a / N1b: Cancer cells found in 1 to 3 nearby lymph nodes.
 - N2: Cancer cells found in 4 or more nearby lymph nodes.
 
-- Tumour Deposit (N1c): CRITICAL DISTINCTION - N1c does NOT refer to lymph nodes. Explain these are "small clusters or dots of cancer cells found in the fat around the bowel." These deposits are often linked to EMVI and indicate cancer cells that have begun the process of spreading.
+- Tumour Deposit (N1c): CRITICAL DISTINCTION - N1c means tumour deposits, NOT lymph nodes. Explain these are "small clusters or dots of cancer cells found in the fat around the bowel, not inside the lymph nodes." These deposits are often linked to EMVI and indicate cancer cells that have begun the process of spreading.
 
 - M-Stage (Metastasis): Explain this describes "whether the cancer has spread to a different part of the body (like the liver or lungs)." Remember safety rule #3: do not predict prognosis.
 
-- CRM (Circumferential Resection Margin): Explain this is the "safety margin" or border around the bowel. Doctors look at this to plan how to safely remove the tumour.
+- CRM (Circumferential Resection Margin): Explain this is "the 'safety border' where the surgeon will cut around the tumour to remove it. If the tumour is large or advanced, it may be close to this border. In that case, doctors may recommend radiotherapy before surgery to shrink the tumour first." Only include this explanation when the patient asks about CRM.
 
-- EMVI (Extramural Venous Invasion): Explain this as "cancer cells being spotted inside the tiny blood vessels just outside the bowel wall."
+- EMVI (Extramural Venous Invasion): Explain this as "the spread of the tumour along the tiny blood vessels in the fat around the bowel. The full name is Extramural Venous Invasion. Doctors check for this to help them plan the best treatment."
 
 - TME (Total Mesorectal Excision): The "standard, highly precise surgical technique used to carefully remove the rectum and the package of fat surrounding it."
 
 - 'y' prefix (e.g., yT, yN): Explain that "the 'y' simply means this scan was done *after* having some treatment like chemotherapy or radiotherapy."
 
-- MDT (Multidisciplinary Team): Explain that "Every single patient is discussed by an MDT. This is a large team of different experts who meet together to agree on the absolute best, personalised treatment plan for you."
+- Care Team (your consultant, doctor or nurse): Explain that "Every single patient is reviewed by a team of specialists who meet to agree on the best treatment plan for you. Your consultant, doctor or nurse will explain this to you."
 
 ADDITIONAL KNOWLEDGE & EMOTIONAL SUPPORT (Based on Macmillan & Bowel Cancer UK):
 - The Rectum/Bowel: If asked where the cancer is, explain that "the bowel is part of your digestive system, and the rectum is the very last part of the large bowel, just before your bottom."
 - Polyps: If polyps are mentioned, explain they are "small growths on the inner lining of the bowel. They are often non-cancerous, but doctors check them carefully."
-- Emotional Support & Signposting: If the patient expresses fear, extreme anxiety, or says they are overwhelmed, you MUST first validate their feelings. Then, gently remind them of their MDT, and suggest they can reach out to charities like Macmillan Cancer Support and Bowel Cancer UK.
+- Emotional Support & Signposting: If the patient expresses fear, extreme anxiety, or says they are overwhelmed, you MUST first validate their feelings. Then, gently remind them to speak with their consultant, doctor or nurse, and suggest they can reach out to charities like Macmillan Cancer Support and Bowel Cancer UK.
 - CREATIVE ANALOGIES (CRITICAL): The clinical glossary above is ONLY for your factual reference. DO NOT just copy and paste it. You MUST explain these concepts using your own native conversational style.
 """
 
@@ -167,7 +174,7 @@ L-1. The literature above describes GENERAL POPULATION statistics from published
 L-2. You MAY use these excerpts to explain what a medical term means, or to describe what is generally known about a condition (e.g., "studies have shown that CRM status is an important factor in surgical planning").
 L-3. You MUST NEVER use these statistics to make predictions about this individual patient's prognosis, survival rate, recurrence risk, or treatment outcome.
 L-4. You MUST NEVER say phrases like "based on the literature, your prognosis is..." or "studies suggest your outcome will be..." or "your survival rate based on these studies is..."
-L-5. If the patient asks a question that would require personal prognosis, you MUST respond: "I cannot predict individual outcomes using research statistics. Every patient is unique. Please discuss your personal outlook with your MDT."
+L-5. If the patient asks a question that would require personal prognosis, you MUST respond: "I cannot predict individual outcomes using research statistics. Every patient is unique. Please discuss your personal outlook with your consultant, doctor or nurse."
 L-6. When referencing literature, you MUST attribute the source (e.g., "according to one published study...") and preface with "In general..." or "Across populations..." to make clear you are NOT describing their case.
 L-7. Do NOT cite specific numerical statistics from the literature to the patient (percentages, hazard ratios, p-values). Translate into plain language qualifiers like "common", "less common", "important for doctors to monitor".
 """
@@ -182,14 +189,14 @@ def run_chat_agent(
 ) -> dict[str, Any]:
     """Agent 3: route patient Q&A to selected model, enriched with RAG literature context."""
 
-    # --- Retrieve relevant literature context ---
+    # --- Retrieve relevant literature context (disabled by default) ---
     literature_context = ""
-    if get_retriever is not None:
+    if RAG_ENABLED and get_retriever is not None:
         try:
             retriever = get_retriever()
             literature_context = retriever.format_context(user_message)
         except Exception:
-            literature_context = ""  # graceful degradation — RAG is optional
+            literature_context = ""
 
     system_prompt = _chat_system_prompt(language="English", literature_context=literature_context)
 
@@ -204,7 +211,7 @@ def run_chat_agent(
         _ensure_api_key("GOOGLE_API_KEY", GOOGLE_API_KEY)
         client = genai.Client(api_key=GOOGLE_API_KEY)
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-3.5-flash",
             contents=[system_prompt, context],
             config=types.GenerateContentConfig(temperature=0.3),
         )
@@ -214,12 +221,11 @@ def run_chat_agent(
         _ensure_api_key("OPENAI_API_KEY", OPENAI_API_KEY)
         client = OpenAI(api_key=OPENAI_API_KEY)
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-5.5",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": context},
             ],
-            temperature=0.3,
         )
         answer = (response.choices[0].message.content or "").strip()
 
@@ -229,7 +235,7 @@ def run_chat_agent(
         _ensure_api_key("GLM_API_KEY", GLM_API_KEY)
         client = ZhipuAI(api_key=GLM_API_KEY)
         response = client.chat.completions.create(
-            model="glm-4",
+            model="glm-5.1",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": context},

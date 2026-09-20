@@ -1,0 +1,48 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: mri-backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./backend:/app
+      # 持久化 SQLite 数据库
+      - mri_data:/app/mri_memory.db
+      # 持久化 Chroma 向量存储
+      - chroma_data:/app/chroma_store
+      # 上传的报告文件
+      - report_uploads:/app/uploaded_reports
+    environment:
+      - ENV=docker
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: mri-frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+    # 开发模式：用 volumes 热更新 (配合 vite dev server)
+    # 生产模式：注释掉 volumes，用 build 的静态文件
+    volumes:
+      - ./frontend/src:/app/src
+    environment:
+      - VITE_API_BASE_URL=http://localhost:8000
+
+volumes:
+  mri_data:
+  chroma_data:
+  report_uploads:

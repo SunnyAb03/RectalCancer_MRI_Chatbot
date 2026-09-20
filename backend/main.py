@@ -1,5 +1,6 @@
 import os
 import shutil
+import traceback
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -34,7 +35,7 @@ app = FastAPI(title="Rectal MRI V2 Backend", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -145,6 +146,7 @@ async def upload_report(
     except HTTPException:
         raise
     except Exception as exc:
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Upload processing failed: {exc}") from exc
     finally:
         file.file.close()
